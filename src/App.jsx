@@ -1,5 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import './App.css';
+
+// Faqat shu ilovaga tegishli kalitlar (boshqa loyihalarning ma'lumotiga tegmaslik uchun)
+const STORAGE_KEYS = { products: 'db_products', orders: 'db_orders', store: 'db_store' };
+
+// Buzilgan yozuv ilovani oq ekranga aylantirmasligi uchun xavfsiz o'qish
+function loadSaved(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return fallback;
+    const parsed = JSON.parse(saved);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// Mahalliy vaqt: toISOString() UTC beradi va O'zbekistonda 5 soat orqada ko'rinadi
+function nowLocal() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Ketma-ket chek raqami: ORD-101, ORD-102, ... (takrorlanmaydi)
+function nextOrderId(orders) {
+  const max = orders.reduce((m, o) => {
+    const n = Number(String(o.id).replace('ORD-', ''));
+    return Number.isFinite(n) ? Math.max(m, n) : m;
+  }, 100);
+  return `ORD-${max + 1}`;
+}
+
+const EMPTY_FORM = { name: '', brand: 'Apple', category: 'Zaryadlovchi', buyPrice: '', sellPrice: '', stock: '' };
 
 const DEFAULT_PRODUCTS = [
   { id: 1, name: "20W USB-C Adapter (Apple)", brand: "Apple", category: "Zaryadlovchi", buyPrice: 90000, sellPrice: 150000, stock: 18, sold: 42 },
@@ -19,23 +52,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('products'); // 'products' | 'orders' | 'analytics' | 'settings'
 
   // Asosiy ma'lumotlar
-  const [products, setProducts] = useState(() => {
-    const saved = localStorage.getItem('db_products');
-    return saved ? JSON.parse(saved) : DEFAULT_PRODUCTS;
-  });
-
-  const [orders, setOrders] = useState(() => {
-    const saved = localStorage.getItem('db_orders');
-    return saved ? JSON.parse(saved) : DEFAULT_ORDERS;
-  });
-
-  const [storeInfo, setStoreInfo] = useState(() => {
-    const saved = localStorage.getItem('db_store');
-    return saved ? JSON.parse(saved) : { storeName: "iStore Aksessuarlar", currency: "so'm", lowStockAlert: 5 };
-  });
+  const [products, setProducts] = useState(() => loadSaved(STORAGE_KEYS.products, DEFAULT_PRODUCTS));
+  const [orders, setOrders] = useState(() => loadSaved(STORAGE_KEYS.orders, DEFAULT_ORDERS));
+  const [storeInfo, setStoreInfo] = useState(() =>
+    loadSaved(STORAGE_KEYS.store, { storeName: "iStore Aksessuarlar", currency: "so'm", lowStockAlert: 5 })
+  );
 
   // Mahsulot Formasi State
-  const [formData, setFormData] = useState({ name: '', brand: 'Apple', category: 'Zaryadlovchi', buyPrice: '', sellPrice: '', stock: '' });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [editId, setEditId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCat, setFilterCat] = useState('Barchasi');
@@ -45,9 +69,13 @@ export default function App() {
 
   // Ma'lumotlarni saqlash
   useEffect(() => {
-    localStorage.setItem('db_products', JSON.stringify(products));
-    localStorage.setItem('db_orders', JSON.stringify(orders));
-    localStorage.setItem('db_store', JSON.stringify(storeInfo));
+    try {
+      localStorage.setItem(STORAGE_KEYS.products, JSON.stringify(products));
+      localStorage.setItem(STORAGE_KEYS.orders, JSON.stringify(orders));
+      localStorage.setItem(STORAGE_KEYS.store, JSON.stringify(storeInfo));
+    } catch {
+      // xotira to'lgan yoki yopiq — ilova ishlashda davom etadi
+    }
   }, [products, orders, storeInfo]);
 
   // Hisob-kitoblar
@@ -59,29 +87,39 @@ export default function App() {
   // Mahsulot qo'shish / tahrirlash
   const handleProductSubmit = (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.sellPrice || !formData.stock) return;
+    // Tuzatildi: oldin "!formData.stock" qoldig'i 0 bo'lgan tovarni saqlashga yo'l qo'ymasdi
+    if (!formData.name.trim() || formData.sellPrice === '' || formData.stock === '') return;
+    const buyPrice = Number(formData.buyPrice || 0);
+    const sellPrice = Number(formData.sellPrice);
+    const stock = Number(formData.stock);
+    if ([buyPrice, sellPrice, stock].some(n => !Number.isFinite(n) || n < 0) || !Number.isInteger(stock)) {
+      alert("Narx va qoldiq manfiy bo'lmasligi, qoldiq butun son bo'lishi kerak.");
+      return;
+    }
 
     if (editId !== null) {
       setProducts(products.map(p => p.id === editId ? {
         ...p,
         ...formData,
-        buyPrice: Number(formData.buyPrice || 0),
-        sellPrice: Number(formData.sellPrice),
-        stock: Number(formData.stock)
+        name: formData.name.trim(),
+        buyPrice,
+        sellPrice,
+        stock
       } : p));
       setEditId(null);
     } else {
       const newProd = {
         id: Date.now(),
         ...formData,
-        buyPrice: Number(formData.buyPrice || 0),
-        sellPrice: Number(formData.sellPrice),
-        stock: Number(formData.stock),
+        name: formData.name.trim(),
+        buyPrice,
+        sellPrice,
+        stock,
         sold: 0
       };
       setProducts([newProd, ...products]);
     }
-    setFormData({ name: '', brand: 'Apple', category: 'Zaryadlovchi', buyPrice: '', sellPrice: '', stock: '' });
+    setFormData(EMPTY_FORM);
   };
 
   const handleEdit = (p) => {
@@ -101,28 +139,34 @@ export default function App() {
     e.preventDefault();
     const product = products.find(p => p.id === Number(saleForm.productId));
     if (!product) return alert("Mahsulotni tanlang!");
-    if (product.stock < saleForm.qty) return alert(`Omborda yetarli tovar yo'q! Qoldiq: ${product.stock}`);
+    const qty = Number(saleForm.qty);
+    if (!Number.isInteger(qty) || qty < 1) return alert("Soni kamida 1 ta butun son bo'lishi kerak.");
+    if (product.stock < qty) return alert(`Omborda yetarli tovar yo'q! Qoldiq: ${product.stock}`);
 
     const newOrder = {
-      id: `ORD-${Date.now().toString().slice(-4)}`,
-      customer: saleForm.customer || "Oddiy Xaridor",
+      id: nextOrderId(orders),
+      customer: saleForm.customer.trim() || "Oddiy Xaridor",
       item: product.name,
-      qty: Number(saleForm.qty),
-      total: product.sellPrice * Number(saleForm.qty),
-      date: new Date().toISOString().slice(0, 16).replace('T', ' ')
+      qty,
+      total: product.sellPrice * qty,
+      date: nowLocal()
     };
 
     // Omborni yangilash
     setProducts(products.map(p => p.id === product.id ? {
       ...p,
-      stock: p.stock - Number(saleForm.qty),
-      sold: (p.sold || 0) + Number(saleForm.qty)
+      stock: p.stock - qty,
+      sold: (p.sold || 0) + qty
     } : p));
 
     setOrders([newOrder, ...orders]);
     setSaleForm({ productId: '', qty: 1, customer: '' });
     alert("Sotuv muvaffaqiyatli amalga oshirildi!");
   };
+
+  // Statistika uchun: eng ko'p sotilgan tovar soni (progress chizig'i shunga nisbatan)
+  const maxSold = Math.max(1, ...products.map(p => p.sold || 0));
+  const lowStockProducts = products.filter(p => Number(p.stock) <= storeInfo.lowStockAlert);
 
   // Filtrlash
   const filteredProducts = products.filter(p => {
@@ -197,8 +241,8 @@ export default function App() {
                 <h3>{editId ? "✏️ Tovarni Tahrirlash" : "➕ Yangi Tovar Kirim Qilish"}</h3>
                 <form onSubmit={handleProductSubmit}>
                   <div className="form-group">
-                    <label>Tovar Nomi</label>
-                    <input 
+                    <label htmlFor="p-name">Tovar Nomi</label>
+                    <input id="p-name" 
                       type="text" 
                       placeholder="Masalan: 35W Dual USB-C Adapter"
                       value={formData.name} 
@@ -209,8 +253,8 @@ export default function App() {
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Brend</label>
-                      <select value={formData.brand} onChange={e => setFormData({...formData, brand: e.target.value})}>
+                      <label htmlFor="p-brand">Brend</label>
+                      <select id="p-brand" value={formData.brand} onChange={e => setFormData({...formData, brand: e.target.value})}>
                         <option value="Apple">Apple</option>
                         <option value="Samsung">Samsung</option>
                         <option value="Xiaomi">Xiaomi</option>
@@ -218,8 +262,8 @@ export default function App() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Kategoriya</label>
-                      <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                      <label htmlFor="p-category">Kategoriya</label>
+                      <select id="p-category" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
                         <option value="Zaryadlovchi">Zaryadlovchi</option>
                         <option value="Kabel">Kabel</option>
                         <option value="Simsiz">Simsiz Zaryadlovchi</option>
@@ -231,18 +275,20 @@ export default function App() {
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Tannarxi ({storeInfo.currency})</label>
-                      <input 
+                      <label htmlFor="p-buy">Tannarxi ({storeInfo.currency})</label>
+                      <input id="p-buy" 
                         type="number" 
+                        min="0"
                         placeholder="Keltirilgan narxi"
                         value={formData.buyPrice} 
                         onChange={e => setFormData({...formData, buyPrice: e.target.value})} 
                       />
                     </div>
                     <div className="form-group">
-                      <label>Sotish Narxi ({storeInfo.currency})</label>
-                      <input 
+                      <label htmlFor="p-sell">Sotish Narxi ({storeInfo.currency})</label>
+                      <input id="p-sell" 
                         type="number" 
+                        min="0"
                         placeholder="Sotuv narxi"
                         value={formData.sellPrice} 
                         onChange={e => setFormData({...formData, sellPrice: e.target.value})} 
@@ -252,9 +298,11 @@ export default function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Kirim Soni (Qoldiq)</label>
-                    <input 
+                    <label htmlFor="p-stock">Kirim Soni (Qoldiq)</label>
+                    <input id="p-stock" 
                       type="number" 
+                      min="0"
+                      step="1"
                       placeholder="10"
                       value={formData.stock} 
                       onChange={e => setFormData({...formData, stock: e.target.value})} 
@@ -264,7 +312,7 @@ export default function App() {
 
                   <div className="form-actions">
                     <button type="submit" className="btn btn-primary">{editId ? "O'zgarishlarni Saqlash" : "Omborga Qo'shish"}</button>
-                    {editId && <button type="button" className="btn btn-secondary" onClick={() => { setEditId(null); setFormData({ name: '', brand: 'Apple', category: 'Zaryadlovchi', buyPrice: '', sellPrice: '', stock: '' }); }}>Bekor qilish</button>}
+                    {editId && <button type="button" className="btn btn-secondary" onClick={() => { setEditId(null); setFormData(EMPTY_FORM); }}>Bekor qilish</button>}
                   </div>
                 </form>
               </div>
@@ -275,11 +323,12 @@ export default function App() {
                   <input 
                     type="text" 
                     className="search-box" 
+                    aria-label="Tovar yoki brend qidirish"
                     placeholder="🔎 Tovar yoki brend qidirish..." 
                     value={searchTerm} 
                     onChange={e => setSearchTerm(e.target.value)} 
                   />
-                  <select value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+                  <select value={filterCat} onChange={e => setFilterCat(e.target.value)} aria-label="Kategoriya bo'yicha filtr">
                     <option value="Barchasi">Barcha Kategoriyalar</option>
                     <option value="Zaryadlovchi">Zaryadlovchi</option>
                     <option value="Kabel">Kabel</option>
@@ -301,6 +350,9 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
+                      {filteredProducts.length === 0 && (
+                        <tr><td colSpan="5" className="empty-note">Tovar topilmadi.</td></tr>
+                      )}
                       {filteredProducts.map(p => (
                         <tr key={p.id}>
                           <td>
@@ -315,8 +367,8 @@ export default function App() {
                             </span>
                           </td>
                           <td>
-                            <button className="btn-action edit" onClick={() => handleEdit(p)}>✎</button>
-                            <button className="btn-action delete" onClick={() => handleDelete(p.id)}>✕</button>
+                            <button type="button" className="btn-action edit" onClick={() => handleEdit(p)} aria-label={`${p.name} — tahrirlash`} title="Tahrirlash">✎</button>
+                            <button type="button" className="btn-action delete" onClick={() => handleDelete(p.id)} aria-label={`${p.name} — o'chirish`} title="O'chirish">✕</button>
                           </td>
                         </tr>
                       ))}
@@ -337,8 +389,8 @@ export default function App() {
                 <h3>⚡ Tezkor Kassa (Sotish)</h3>
                 <form onSubmit={handleSaleSubmit}>
                   <div className="form-group">
-                    <label>Mahsulotni Tanlang</label>
-                    <select value={saleForm.productId} onChange={e => setSaleForm({...saleForm, productId: e.target.value})} required>
+                    <label htmlFor="s-product">Mahsulotni Tanlang</label>
+                    <select id="s-product" value={saleForm.productId} onChange={e => setSaleForm({...saleForm, productId: e.target.value})} required>
                       <option value="">-- Mahsulotni tanlang --</option>
                       {products.map(p => (
                         <option key={p.id} value={p.id} disabled={p.stock === 0}>
@@ -349,8 +401,8 @@ export default function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Xaridor Ismi / Raqami</label>
-                    <input 
+                    <label htmlFor="s-customer">Xaridor Ismi / Raqami</label>
+                    <input id="s-customer" 
                       type="text" 
                       placeholder="Mijoz ismi" 
                       value={saleForm.customer} 
@@ -359,10 +411,11 @@ export default function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Sotilayotgan Soni</label>
-                    <input 
+                    <label htmlFor="s-qty">Sotilayotgan Soni</label>
+                    <input id="s-qty" 
                       type="number" 
                       min="1" 
+                      step="1"
                       value={saleForm.qty} 
                       onChange={e => setSaleForm({...saleForm, qty: e.target.value})} 
                       required 
@@ -417,7 +470,7 @@ export default function App() {
                       <div>
                         <strong>{p.name}</strong>
                         <div className="progress-bar-bg">
-                          <div className="progress-bar-fill" style={{ width: `${Math.min(100, ((p.sold || 0) / 70) * 100)}%` }}></div>
+                          <div className="progress-bar-fill" style={{ width: `${((p.sold || 0) / maxSold) * 100}%` }}></div>
                         </div>
                       </div>
                       <div className="analytics-val">{p.sold || 0} ta sotildi</div>
@@ -429,7 +482,8 @@ export default function App() {
               <div className="card">
                 <h3>⚠️ Qoldig'i Kamaygan Tovarlar Nazorati</h3>
                 <div className="low-stock-list">
-                  {products.filter(p => p.stock <= storeInfo.lowStockAlert).map(p => (
+                  {lowStockProducts.length === 0 && <p className="empty-note">Hamma tovarlar yetarli. 👍</p>}
+                  {lowStockProducts.map(p => (
                     <div className="low-stock-card" key={p.id}>
                       <div>
                         <strong>{p.name}</strong>
@@ -450,8 +504,8 @@ export default function App() {
             <div className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
               <h3>⚙️ Do'kon va Tizim Sozlamalari</h3>
               <div className="form-group">
-                <label>Do'kon Nomi</label>
-                <input 
+                <label htmlFor="st-name">Do'kon Nomi</label>
+                <input id="st-name" 
                   type="text" 
                   value={storeInfo.storeName} 
                   onChange={e => setStoreInfo({...storeInfo, storeName: e.target.value})} 
@@ -459,8 +513,8 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label>Valyuta Belgisi</label>
-                <input 
+                <label htmlFor="st-currency">Valyuta Belgisi</label>
+                <input id="st-currency" 
                   type="text" 
                   value={storeInfo.currency} 
                   onChange={e => setStoreInfo({...storeInfo, currency: e.target.value})} 
@@ -468,9 +522,10 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label>Ogohlantirish Qoldiq Chegarasi (Limit)</label>
-                <input 
+                <label htmlFor="st-limit">Ogohlantirish Qoldiq Chegarasi (Limit)</label>
+                <input id="st-limit" 
                   type="number" 
+                  min="0"
                   value={storeInfo.lowStockAlert} 
                   onChange={e => setStoreInfo({...storeInfo, lowStockAlert: Number(e.target.value)})} 
                 />
@@ -481,7 +536,9 @@ export default function App() {
                 style={{ marginTop: '20px', background: '#ef4444', color: 'white' }}
                 onClick={() => {
                   if (window.confirm("Barcha ma'lumotlar o'chib ketadi! Bosh holatga qaytarasizmi?")) {
-                    localStorage.clear();
+                    // Faqat shu ilovaning ma'lumotlari o'chiriladi (localStorage.clear() boshqa
+                    // loyihalarning ma'lumotlarini ham o'chirib yuborardi)
+                    Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
                     window.location.reload();
                   }
                 }}
