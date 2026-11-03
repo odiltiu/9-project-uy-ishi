@@ -1,16 +1,18 @@
-# React + Vite
+# iStore Aksessuarlar — ombor va kassa paneli
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Telefon aksessuarlari do'koni uchun admin panel (React + Vite). Ma'lumotlar brauzer xotirasida (`localStorage`) saqlanadi.
 
-Currently, two official plugins are available:
+## Imkoniyatlar
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Ombor:** tovar qo'shish, tahrirlash, o'chirish; qidiruv va kategoriya bo'yicha filtr
+- **Kassa:** tezkor sotuv, chek tarixi (mahalliy vaqt bilan), qoldiq avtomatik kamayadi
+- **Statistika:** eng ko'p sotilgan tovarlar, qoldig'i kam tovarlar
+- **Sozlamalar:** do'kon nomi, valyuta, kam qoldiq chegarasi, faqat shu ilova ma'lumotlarini tozalash
+- Telefon va planshetga moslashgan
 
-## React Compiler
+## Ishga tushirish
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
